@@ -51,12 +51,6 @@ class SalesForecastingModel:
     """
     
     def __init__(self, store_id: str = 'STORE_1'):
-        """
-        Инициализация класса.
-        
-        Args:
-            store_id: ID магазина для прогнозирования (по умолчанию STORE_1)
-        """
         self.store_id = store_id
         self.models = {}
         self.best_models = {}
@@ -73,14 +67,6 @@ class SalesForecastingModel:
         self.items = None
         
     def load_data(self, sales_path: str, calendar_path: str, prices_path: str) -> None:
-        """
-        Загрузка исходных данных.
-        
-        Args:
-            sales_path: Путь к файлу с данными о продажах
-            calendar_path: Путь к файлу с календарными данными
-            prices_path: Путь к файлу с данными о ценах
-        """
         # Загрузка данных
         sales = pd.read_csv('data/shop_sales.csv')
         calendar = pd.read_csv('data/shop_sales_dates.csv')
@@ -115,15 +101,11 @@ class SalesForecastingModel:
         calendar = self.calendar_data.copy()
         prices = self.prices_data.copy()
         
-        # Преобразование даты в datetime
         calendar['date'] = pd.to_datetime(calendar['date'])
         
-        # Объединение данных о продажах с календарем
         data = sales.merge(calendar[['date_id', 'date', 'wm_yr_wk', 'weekday', 'month', 'year', 
                                     f'CASHBACK_{self.store_id}']], 
                           on='date_id', how='left')
-        
-        # Объединение с данными о ценах
         data = data.merge(prices[['item_id', 'wm_yr_wk', 'sell_price']], 
                          on=['item_id', 'wm_yr_wk'], how='left')
         
@@ -183,15 +165,6 @@ class SalesForecastingModel:
         return data
     
     def train_models(self, test_size: int = 30) -> Dict:
-        """
-        Обучение различных моделей прогнозирования.
-        
-        Args:
-            test_size: Размер тестовой выборки в днях
-            
-        Returns:
-            Словарь с обученными моделями
-        """
         if self.processed_data is None:
             raise ValueError("Данные не предобработаны. Используйте метод preprocess_data() сначала.")
         
@@ -225,15 +198,6 @@ class SalesForecastingModel:
         return all_models
     
     def _train_arima_models(self, test_size: int = 30) -> Dict:
-        """
-        Обучение ARIMA моделей для каждого товара.
-        
-        Args:
-            test_size: Размер тестовой выборки в днях
-            
-        Returns:
-            Словарь с обученными ARIMA моделями
-        """
         print("Обучение ARIMA моделей...")
         
         arima_models = {}
@@ -241,15 +205,10 @@ class SalesForecastingModel:
         for item in self.items:
             print(f"  Обучение ARIMA модели для товара {item}...")
             
-            # Фильтрация данных для текущего товара
             item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
-            
-            # Разделение на обучающую и тестовую выборки
             train_data = item_data.iloc[:-test_size]
             
             try:
-                # Создание временного ряда для ARIMA
-                # Важно: используем числовой индекс вместо дат, чтобы избежать ошибки с индексом
                 y_train = train_data['cnt'].reset_index(drop=True)
                 
                 # Подбор параметров ARIMA
@@ -282,92 +241,37 @@ class SalesForecastingModel:
         
         return arima_models
     
-    def _train_ets_models(self, test_size: int) -> Dict:
-        """
-        Обучение ETS моделей для каждого товара.
-        
-        Args:
-            test_size: Размер тестовой выборки в днях
-            
-        Returns:
-            Словарь с обученными ETS моделями
-        """
+    def _train_ets_models(self, test_size: int = 30) -> Dict:
         print("Обучение ETS моделей...")
         
         ets_models = {}
         
         for item in self.items:
-            # Фильтрация данных для текущего товара
-            item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
+            print(f"  Обучение ETS модели для товара {item}...")
             
-            # Выделение обучающей выборки
+            item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
             train_data = item_data.iloc[:-test_size]
             
-            # Обучение ETS модели
             try:
-                # Подбор оптимальных параметров
-                best_aic = float('inf')
-                best_params = None
+                y_train = train_data['cnt'].reset_index(drop=True)
                 
-                # Перебор параметров
-                for trend, seasonal in product(['add', 'mul', None], ['add', 'mul', None]):
-                    try:
-                        # Пропускаем комбинацию, где оба параметра None
-                        if trend is None and seasonal is None:
-                            continue
-                        
-                        # Определяем сезонный период
-                        seasonal_periods = 7  # Недельная сезонность
-                        
-                        model = ExponentialSmoothing(
-                            train_data['cnt'],
-                            trend=trend,
-                            seasonal=seasonal,
-                            seasonal_periods=seasonal_periods
-                        )
-                        results = model.fit()
-                        
-                        # Используем AIC как критерий качества
-                        aic = len(train_data) * np.log(np.mean(results.resid ** 2)) + 2 * len(results.params)
-                        
-                        if aic < best_aic:
-                            best_aic = aic
-                            best_params = (trend, seasonal)
-                    except:
-                        continue
-                
-                # Если не удалось подобрать параметры, используем значения по умолчанию
-                if best_params is None:
-                    best_params = ('add', 'add')
-                
-                # Обучение модели с лучшими параметрами
+                # Обучение ETS модели
                 model = ExponentialSmoothing(
-                    train_data['cnt'],
-                    trend=best_params[0],
-                    seasonal=best_params[1],
-                    seasonal_periods=7
+                    y_train,
+                    trend='add',
+                    seasonal='add',
+                    seasonal_periods=7  # Недельная сезонность
                 )
+                
                 ets_models[item] = model.fit()
                 
-                print(f"  ETS модель для товара {item} обучена с параметрами {best_params}")
+                print(f"    ETS модель обучена для товара {item}.")
             except Exception as e:
-                print(f"  Ошибка при обучении ETS модели для товара {item}: {e}")
-                # Используем простую модель в случае ошибки
-                model = ExponentialSmoothing(train_data['cnt'], trend='add', seasonal='add', seasonal_periods=7)
-                ets_models[item] = model.fit()
+                print(f"    Ошибка при обучении ETS модели для товара {item}: {e}")
         
         return ets_models
     
     def _train_linear_models(self, test_size: int = 30) -> Dict:
-        """
-        Обучение линейных моделей для каждого товара.
-        
-        Args:
-            test_size: Размер тестовой выборки в днях
-            
-        Returns:
-            Словарь с обученными линейными моделями
-        """
         print("Обучение линейных моделей...")
         
         linear_models = {}
@@ -375,15 +279,11 @@ class SalesForecastingModel:
         for item in self.items:
             print(f"  Обучение линейной модели для товара {item}...")
             
-            # Фильтрация данных для текущего товара
             item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
             
-            # Разделение на обучающую и тестовую выборки
             train_data = item_data.iloc[:-test_size]
             
             try:
-                # Подготовка признаков и целевой переменной
-                # Преобразуем категориальные признаки в числовые
                 X_train = pd.get_dummies(train_data[self.feature_columns], drop_first=True)
                 y_train = train_data[self.target_column]
                 
@@ -405,96 +305,77 @@ class SalesForecastingModel:
         
         return linear_models
     
-    def _train_gbm_models(self, test_size: int) -> Dict:
-        """
-        Обучение моделей градиентного бустинга для каждого товара.
-        
-        Args:
-            test_size: Размер тестовой выборки в днях
-            
-        Returns:
-            Словарь с обученными моделями градиентного бустинга и скейлерами
-        """
+    def _train_gbm_models(self, test_size: int = 30) -> Dict:
         print("Обучение моделей градиентного бустинга...")
         
         gbm_models = {}
         self.scalers['gbm'] = {}
         
         for item in self.items:
-            # Фильтрация данных для текущего товара
+            print(f"  Обучение модели градиентного бустинга для товара {item}...")
+            
             item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
             
-            # Выделение обучающей выборки
             train_data = item_data.iloc[:-test_size]
             
-            # Подготовка признаков и целевой переменной
-            X = train_data[self.feature_columns].fillna(0)
-            y = train_data[self.target_column]
-            
-            # Масштабирование признаков
-            scaler = StandardScaler()
-            X_scaled = scaler.fit_transform(X)
-            
-            # Сохранение скейлера
-            self.scalers['gbm'][item] = scaler
-            
-            # Обучение модели градиентного бустинга
             try:
+                X_train = pd.get_dummies(train_data[self.feature_columns], drop_first=True)
+                y_train = train_data[self.target_column]
+                
+                # Удаляем строки с пропущенными значениями
+                mask = ~(X_train.isna().any(axis=1) | y_train.isna())
+                X_train = X_train[mask]
+                y_train = y_train[mask]
+                
+                # Масштабирование признаков
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                
+                # Сохранение скейлера
+                self.scalers['gbm'][item] = scaler
+                
+                # Обучение модели градиентного бустинга
                 model = GradientBoostingRegressor(
                     n_estimators=100,
                     learning_rate=0.1,
                     max_depth=3,
                     random_state=42
                 )
-                model.fit(X_scaled, y)
+                model.fit(X_train_scaled, y_train)
                 gbm_models[item] = model
                 
-                print(f"  Модель градиентного бустинга для товара {item} обучена")
+                print(f"    Модель градиентного бустинга обучена для товара {item}.")
             except Exception as e:
-                print(f"  Ошибка при обучении модели градиентного бустинга для товара {item}: {e}")
+                print(f"    Ошибка при обучении модели градиентного бустинга для товара {item}: {e}")
         
         return gbm_models
     
     def evaluate_models(self, test_size: int = 30) -> pd.DataFrame:
-        """
-        Оценка качества моделей на тестовой выборке.
-        
-        Args:
-            test_size: Размер тестовой выборки в днях
-            
-        Returns:
-            DataFrame с метриками качества для каждой модели и товара
-        """
         if not self.models:
             raise ValueError("Модели не обучены. Используйте метод train_models() сначала.")
         
+        if self.processed_data is None:
+            raise ValueError("Данные не предобработаны. Используйте метод preprocess_data() сначала.")
+        
         print("Оценка качества моделей...")
         
-        # Список для хранения результатов
         results = []
         
         for item in self.items:
-            # Фильтрация данных для текущего товара
+            print(f"  Оценка моделей для товара {item}...")
             item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
-            
-            # Выделение тестовой выборки
             test_data = item_data.iloc[-test_size:]
-            
-            # Фактические значения
             y_true = test_data[self.target_column].values
             
             # Оценка ARIMA модели
             if 'arima' in self.models and item in self.models['arima']:
                 try:
-                    # Прогноз ARIMA модели
                     y_pred = self.models['arima'][item].forecast(steps=test_size)
                     
-                    # Расчет метрик
                     mae = mean_absolute_error(y_true, y_pred)
                     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
                     mape = mean_absolute_percentage_error(y_true, y_pred) * 100
                     
-                    # Добавление результатов
                     results.append({
                         'item_id': item,
                         'model': 'arima',
@@ -503,20 +384,17 @@ class SalesForecastingModel:
                         'MAPE': mape
                     })
                 except Exception as e:
-                    print(f"  Ошибка при оценке ARIMA модели для товара {item}: {e}")
+                    print(f"    Ошибка при оценке ARIMA модели для товара {item}: {e}")
             
             # Оценка ETS модели
             if 'ets' in self.models and item in self.models['ets']:
                 try:
-                    # Прогноз ETS модели
-                    y_pred = self.models['ets'][item].forecast(steps=test_size)
+                    y_pred = self.models['ets'][item].forecast(test_size)
                     
-                    # Расчет метрик
                     mae = mean_absolute_error(y_true, y_pred)
                     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
                     mape = mean_absolute_percentage_error(y_true, y_pred) * 100
                     
-                    # Добавление результатов
                     results.append({
                         'item_id': item,
                         'model': 'ets',
@@ -525,26 +403,22 @@ class SalesForecastingModel:
                         'MAPE': mape
                     })
                 except Exception as e:
-                    print(f"  Ошибка при оценке ETS модели для товара {item}: {e}")
+                    print(f"    Ошибка при оценке ETS модели для товара {item}: {e}")
             
             # Оценка линейной модели
             if 'linear' in self.models and item in self.models['linear']:
                 try:
-                    # Подготовка признаков
-                    X_test = test_data[self.feature_columns].fillna(0)
+                    X_test = pd.get_dummies(test_data[self.feature_columns], drop_first=True)
+                    missing_cols = set(self.models['linear'][item].feature_names_in_) - set(X_test.columns)
+                    for col in missing_cols:
+                        X_test[col] = 0
+                    X_test = X_test[self.models['linear'][item].feature_names_in_]
                     
-                    # Масштабирование признаков
-                    X_test_scaled = self.scalers['linear'][item].transform(X_test)
-                    
-                    # Прогноз линейной модели
-                    y_pred = self.models['linear'][item].predict(X_test_scaled)
-                    
-                    # Расчет метрик
+                    y_pred = self.models['linear'][item].predict(X_test)
                     mae = mean_absolute_error(y_true, y_pred)
                     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
                     mape = mean_absolute_percentage_error(y_true, y_pred) * 100
                     
-                    # Добавление результатов
                     results.append({
                         'item_id': item,
                         'model': 'linear',
@@ -553,26 +427,25 @@ class SalesForecastingModel:
                         'MAPE': mape
                     })
                 except Exception as e:
-                    print(f"  Ошибка при оценке линейной модели для товара {item}: {e}")
+                    print(f"    Ошибка при оценке линейной модели для товара {item}: {e}")
             
             # Оценка модели градиентного бустинга
             if 'gbm' in self.models and item in self.models['gbm']:
                 try:
-                    # Подготовка признаков
-                    X_test = test_data[self.feature_columns].fillna(0)
+                    X_test = pd.get_dummies(test_data[self.feature_columns], drop_first=True)
                     
-                    # Масштабирование признаков
+                    missing_cols = set(self.models['gbm'][item].feature_names_in_) - set(X_test.columns)
+                    for col in missing_cols:
+                        X_test[col] = 0
+                    X_test = X_test[self.models['gbm'][item].feature_names_in_]
                     X_test_scaled = self.scalers['gbm'][item].transform(X_test)
                     
-                    # Прогноз модели градиентного бустинга
                     y_pred = self.models['gbm'][item].predict(X_test_scaled)
                     
-                    # Расчет метрик
                     mae = mean_absolute_error(y_true, y_pred)
                     rmse = np.sqrt(mean_squared_error(y_true, y_pred))
                     mape = mean_absolute_percentage_error(y_true, y_pred) * 100
                     
-                    # Добавление результатов
                     results.append({
                         'item_id': item,
                         'model': 'gbm',
@@ -581,12 +454,10 @@ class SalesForecastingModel:
                         'MAPE': mape
                     })
                 except Exception as e:
-                    print(f"  Ошибка при оценке модели градиентного бустинга для товара {item}: {e}")
+                    print(f"    Ошибка при оценке модели градиентного бустинга для товара {item}: {e}")
         
         # Создание DataFrame с результатами
         results_df = pd.DataFrame(results)
-        
-        # Сохранение результатов
         self.metrics = results_df
         
         # Определение лучшей модели для каждого товара
@@ -598,12 +469,6 @@ class SalesForecastingModel:
         return results_df
     
     def save_models(self, path: str = 'models') -> None:
-        """
-        Сохранение обученных моделей.
-        
-        Args:
-            path: Путь для сохранения моделей
-        """
         if not self.models:
             raise ValueError("Модели не обучены. Используйте метод train_models() сначала.")
         
@@ -632,12 +497,6 @@ class SalesForecastingModel:
         print(f"Модели сохранены в директории {path}")
     
     def load_models(self, path: str = 'models') -> None:
-        """
-        Загрузка сохраненных моделей.
-        
-        Args:
-            path: Путь к сохраненным моделям
-        """
         # Загрузка моделей
         with open(f"{path}/{self.store_id}_models.pkl", 'rb') as f:
             self.models = pickle.load(f)
@@ -659,16 +518,6 @@ class SalesForecastingModel:
         print(f"Модели загружены из директории {path}")
     
     def forecast(self, horizon: int = 7, use_best_model: bool = True) -> pd.DataFrame:
-        """
-        Прогнозирование продаж на указанный горизонт.
-        
-        Args:
-            horizon: Горизонт прогнозирования в днях
-            use_best_model: Использовать только лучшую модель для каждого товара
-            
-        Returns:
-            DataFrame с прогнозами
-        """
         if not self.models:
             raise ValueError("Модели не обучены. Используйте метод train_models() сначала.")
         
@@ -677,16 +526,13 @@ class SalesForecastingModel:
         
         print(f"Прогнозирование на {horizon} дней вперед...")
         
-        # Список для хранения прогнозов
         all_forecasts = []
         
-        # Последняя дата в данных
         last_date = self.processed_data['date'].max()
         
         for item in self.items:
             print(f"  Прогнозирование для товара {item}...")
             
-            # Фильтрация данных для текущего товара
             item_data = self.processed_data[self.processed_data['item_id'] == item].sort_values('date')
             
             # Определение модели для прогнозирования
@@ -699,7 +545,6 @@ class SalesForecastingModel:
                 if item_forecast is not None:
                     all_forecasts.append(item_forecast)
             else:
-                # Если лучшая модель не определена или use_best_model=False, используем все доступные модели
                 for model_type in self.models.keys():
                     if item in self.models[model_type]:
                         print(f"    Используется модель: {model_type}")
@@ -718,31 +563,101 @@ class SalesForecastingModel:
     
     def _forecast_item(self, item: str, model_type: str, item_data: pd.DataFrame, 
                       last_date: datetime, horizon: int) -> Optional[pd.DataFrame]:
-        """
-        Прогнозирование продаж для конкретного товара с использованием указанной модели.
-        
-        Args:
-            item: ID товара
-            model_type: Тип модели ('arima', 'linear', 'gbm', 'ets')
-            item_data: DataFrame с данными для товара
-            last_date: Последняя дата в данных
-            horizon: Горизонт прогнозирования в днях
-            
-        Returns:
-            DataFrame с прогнозами или None в случае ошибки
-        """
         try:
             # Создание дат для прогноза
             forecast_dates = [last_date + timedelta(days=i+1) for i in range(horizon)]
             
-            # Создание DataFrame для прогноза
+            # Прогнозирование в зависимости от типа модели
+            if model_type == 'arima':
+                # Прогноз ARIMA модели
+                forecast_values = self.models[model_type][item].forecast(steps=horizon)
+                
+                # Проверка на наличие NA или inf значений
+                if np.any(np.isnan(forecast_values)) or np.any(np.isinf(forecast_values)):
+                    print(f"    Предупреждение: ARIMA модель для товара {item} вернула NA или inf значения. Заменяем их на 0.")
+                    forecast_values = np.nan_to_num(forecast_values, nan=0.0, posinf=0.0, neginf=0.0)
+                
+                # Округление и преобразование в целые числа (продажи не могут быть дробными)
+                forecast_values = np.round(forecast_values).astype(int)
+                
+                # Отрицательные значения заменяем на 0
+                forecast_values = np.maximum(forecast_values, 0)
+                
+            elif model_type == 'ets':
+                # Прогноз ETS модели
+                forecast_values = self.models[model_type][item].forecast(horizon)
+                
+                # Проверка на наличие NA или inf значений
+                if np.any(np.isnan(forecast_values)) or np.any(np.isinf(forecast_values)):
+                    print(f"    Предупреждение: ETS модель для товара {item} вернула NA или inf значения. Заменяем их на 0.")
+                    forecast_values = np.nan_to_num(forecast_values, nan=0.0, posinf=0.0, neginf=0.0)
+                
+                # Округление и преобразование в целые числа
+                forecast_values = np.round(forecast_values).astype(int)
+                
+                # Отрицательные значения заменяем на 0
+                forecast_values = np.maximum(forecast_values, 0)
+                
+            elif model_type in ['linear', 'gbm']:
+                # Создание признаков для прогноза
+                forecast_features = self._create_forecast_features(item, item_data, forecast_dates)
+                
+                if forecast_features is None:
+                    print(f"    Ошибка при создании признаков для прогноза товара {item}")
+                    return None
+                
+                # Преобразование категориальных признаков
+                X_forecast = pd.get_dummies(forecast_features, drop_first=True)
+                
+                # Убедимся, что у нас те же столбцы, что и при обучении
+                if hasattr(self.models[model_type][item], 'feature_names_in_'):
+                    missing_cols = set(self.models[model_type][item].feature_names_in_) - set(X_forecast.columns)
+                    for col in missing_cols:
+                        X_forecast[col] = 0
+                    X_forecast = X_forecast[self.models[model_type][item].feature_names_in_]
+                
+                # Масштабирование признаков для GBM
+                if model_type == 'gbm' and item in self.scalers.get('gbm', {}):
+                    X_forecast_scaled = self.scalers['gbm'][item].transform(X_forecast)
+                    forecast_values = self.models[model_type][item].predict(X_forecast_scaled)
+                else:
+                    forecast_values = self.models[model_type][item].predict(X_forecast)
+                
+                # Проверка на наличие NA или inf значений
+                if np.any(np.isnan(forecast_values)) or np.any(np.isinf(forecast_values)):
+                    print(f"    Предупреждение: Модель {model_type} для товара {item} вернула NA или inf значения. Заменяем их на 0.")
+                    forecast_values = np.nan_to_num(forecast_values, nan=0.0, posinf=0.0, neginf=0.0)
+                
+                # Округление и преобразование в целые числа
+                forecast_values = np.round(forecast_values).astype(int)
+                
+                # Отрицательные значения заменяем на 0
+                forecast_values = np.maximum(forecast_values, 0)
+            else:
+                print(f"    Неизвестный тип модели: {model_type}")
+                return None
+            
+            # Создание DataFrame с прогнозами
             forecast_df = pd.DataFrame({
                 'date': forecast_dates,
+                'cnt': forecast_values,
                 'item_id': item,
-                'store_id': self.store_id
+                'model': model_type
             })
             
-            # Добавление календарных признаков
+            return forecast_df
+        
+        except Exception as e:
+            print(f"    Ошибка при прогнозировании для товара {item} с моделью {model_type}: {e}")
+            return None
+    
+    def _create_forecast_features(self, item: str, historical_data: pd.DataFrame, 
+                                 forecast_dates: List[datetime]) -> Optional[pd.DataFrame]:
+        try:
+            # Создание DataFrame с датами для прогноза
+            forecast_df = pd.DataFrame({'date': forecast_dates})
+            
+            # Добавление признаков на основе даты
             forecast_df['day_of_week'] = forecast_df['date'].dt.dayofweek
             forecast_df['day_of_month'] = forecast_df['date'].dt.day
             forecast_df['week_of_year'] = forecast_df['date'].dt.isocalendar().week
@@ -750,154 +665,75 @@ class SalesForecastingModel:
             forecast_df['year'] = forecast_df['date'].dt.year
             forecast_df['is_weekend'] = forecast_df['day_of_week'].isin([5, 6]).astype(int)
             
-            # Получение последних значений продаж для создания лагов
-            last_sales = item_data['cnt'].tail(28).values
+            # Добавление последней известной цены
+            last_price = historical_data['sell_price'].iloc[-1]
+            forecast_df['sell_price'] = last_price
             
-            # Прогнозирование в зависимости от типа модели
-            if model_type == 'arima':
-                # Прогнозирование с использованием ARIMA
-                model = self.models['arima'][item]
-                forecast_values = model.forecast(steps=horizon)
-                forecast_df['cnt'] = forecast_values
-                
-            elif model_type == 'ets':
-                # Прогнозирование с использованием ETS
-                model = self.models['ets'][item]
-                forecast_values = model.forecast(horizon)
-                forecast_df['cnt'] = forecast_values
-                
-            elif model_type in ['linear', 'gbm']:
-                # Прогнозирование с использованием ML моделей
-                # Для этого нужно создать все необходимые признаки
-                
-                # Инициализация прогнозов
-                forecasted_sales = np.zeros(horizon)
-                
-                # Последние значения для создания лагов
-                for i in range(horizon):
-                    # Создание лаговых признаков
-                    if i == 0:
-                        forecast_df.loc[i, 'lag_1'] = last_sales[-1]
-                        forecast_df.loc[i, 'lag_7'] = last_sales[-7] if len(last_sales) >= 7 else np.mean(last_sales)
-                        forecast_df.loc[i, 'lag_14'] = last_sales[-14] if len(last_sales) >= 14 else np.mean(last_sales)
-                        forecast_df.loc[i, 'lag_28'] = last_sales[-28] if len(last_sales) >= 28 else np.mean(last_sales)
-                    else:
-                        forecast_df.loc[i, 'lag_1'] = forecasted_sales[i-1]
-                        forecast_df.loc[i, 'lag_7'] = last_sales[-7+i] if i < 7 else forecasted_sales[i-7]
-                        forecast_df.loc[i, 'lag_14'] = last_sales[-14+i] if i < 14 else forecasted_sales[i-14]
-                        forecast_df.loc[i, 'lag_28'] = last_sales[-28+i] if i < 28 else forecasted_sales[i-28]
-                    
-                    # Создание скользящих средних
-                    if i == 0:
-                        forecast_df.loc[i, 'rolling_mean_7'] = np.mean(last_sales[-7:])
-                        forecast_df.loc[i, 'rolling_mean_14'] = np.mean(last_sales[-14:])
-                        forecast_df.loc[i, 'rolling_mean_28'] = np.mean(last_sales[-28:])
-                        forecast_df.loc[i, 'rolling_std_7'] = np.std(last_sales[-7:])
-                        forecast_df.loc[i, 'rolling_std_14'] = np.std(last_sales[-14:])
-                        forecast_df.loc[i, 'rolling_std_28'] = np.std(last_sales[-28:])
-                    else:
-                        # Обновляем скользящие средние с учетом прогнозов
-                        values_7 = np.concatenate([last_sales[-7+i:], forecasted_sales[:i]]) if i < 7 else forecasted_sales[i-7:i]
-                        values_14 = np.concatenate([last_sales[-14+i:], forecasted_sales[:i]]) if i < 14 else forecasted_sales[i-14:i]
-                        values_28 = np.concatenate([last_sales[-28+i:], forecasted_sales[:i]]) if i < 28 else forecasted_sales[i-28:i]
-                        
-                        forecast_df.loc[i, 'rolling_mean_7'] = np.mean(values_7)
-                        forecast_df.loc[i, 'rolling_mean_14'] = np.mean(values_14)
-                        forecast_df.loc[i, 'rolling_mean_28'] = np.mean(values_28)
-                        forecast_df.loc[i, 'rolling_std_7'] = np.std(values_7)
-                        forecast_df.loc[i, 'rolling_std_14'] = np.std(values_14)
-                        forecast_df.loc[i, 'rolling_std_28'] = np.std(values_28)
-                    
-                    # Добавляем цену (используем последнюю известную цену)
-                    forecast_df.loc[i, 'sell_price'] = item_data['sell_price'].iloc[-1]
-                    
-                    # Добавляем CASHBACK (используем последнее известное значение)
-                    cashback_col = f'CASHBACK_{self.store_id}'
-                    if cashback_col in item_data.columns:
-                        forecast_df.loc[i, cashback_col] = item_data[cashback_col].iloc[-1]
-                    
-                    # Заполняем пропущенные значения средними
-                    for col in self.feature_columns:
-                        if col not in forecast_df.columns and col in item_data.columns:
-                            forecast_df[col] = item_data[col].mean()
-                    
-                    # Прогнозирование
-                    X = forecast_df.iloc[i:i+1][self.feature_columns].fillna(0)
-                    
-                    if model_type == 'linear':
-                        # Прогноз линейной модели
-                        forecasted_sales[i] = self.models['linear'][item].predict(X)[0]
-                    elif model_type == 'gbm':
-                        # Масштабирование признаков
-                        X_scaled = self.scalers['gbm'][item].transform(X)
-                        # Прогноз модели градиентного бустинга
-                        forecasted_sales[i] = self.models['gbm'][item].predict(X_scaled)[0]
-                
-                # Добавляем прогнозы в DataFrame
-                forecast_df['cnt'] = forecasted_sales
+            # Добавление CASHBACK (если есть)
+            if f'CASHBACK_{self.store_id}' in historical_data.columns:
+                # Используем среднее значение CASHBACK
+                cashback_mean = historical_data[f'CASHBACK_{self.store_id}'].mean()
+                forecast_df[f'CASHBACK_{self.store_id}'] = cashback_mean
             
-            # Округляем прогнозы до целых чисел и обеспечиваем неотрицательность
-            forecast_df['cnt'] = np.maximum(0, np.round(forecast_df['cnt'])).astype(int)
+            # Добавление лаговых признаков
+            for lag in [1, 7, 14, 28]:
+                lag_values = []
+                for date in forecast_dates:
+                    # Находим дату, от которой нужно взять лаг
+                    lag_date = date - timedelta(days=lag)
+                    # Находим ближайшую дату в исторических данных
+                    closest_data = historical_data[historical_data['date'] <= lag_date].sort_values('date').tail(1)
+                    if not closest_data.empty:
+                        lag_values.append(closest_data['cnt'].values[0])
+                    else:
+                        # Если нет данных, используем 0
+                        lag_values.append(0)
+                forecast_df[f'lag_{lag}'] = lag_values
+            
+            # Добавление скользящих средних
+            for window in [7, 14, 28]:
+                # Используем последние значения скользящих средних
+                rolling_mean = historical_data[f'rolling_mean_{window}'].iloc[-1]
+                forecast_df[f'rolling_mean_{window}'] = rolling_mean
+                
+                # Используем последние значения скользящих стандартных отклонений
+                rolling_std = historical_data[f'rolling_std_{window}'].iloc[-1]
+                forecast_df[f'rolling_std_{window}'] = rolling_std
+            
+            # Добавление праздничных признаков (если есть)
+            holiday_cols = [col for col in historical_data.columns if 'event' in col]
+            for col in holiday_cols:
+                # Для простоты используем 0 (нет праздника)
+                forecast_df[col] = 0
             
             return forecast_df
-            
+        
         except Exception as e:
-            print(f"    Ошибка при прогнозировании для товара {item} с моделью {model_type}: {e}")
+            print(f"    Ошибка при создании признаков для прогноза товара {item}: {e}")
             return None
     
     def forecast_weekly(self, use_best_model: bool = True) -> pd.DataFrame:
-        """
-        Прогнозирование продаж на неделю вперед.
-        
-        Args:
-            use_best_model: Использовать только лучшую модель для каждого товара
-            
-        Returns:
-            DataFrame с прогнозами на неделю
-        """
         return self.forecast(horizon=7, use_best_model=use_best_model)
     
     def forecast_monthly(self, use_best_model: bool = True) -> pd.DataFrame:
-        """
-        Прогнозирование продаж на месяц вперед.
-        
-        Args:
-            use_best_model: Использовать только лучшую модель для каждого товара
-            
-        Returns:
-            DataFrame с прогнозами на месяц
-        """
         return self.forecast(horizon=30, use_best_model=use_best_model)
     
     def forecast_quarterly(self, use_best_model: bool = True) -> pd.DataFrame:
-        """
-        Прогнозирование продаж на квартал вперед.
-        
-        Args:
-            use_best_model: Использовать только лучшую модель для каждого товара
-            
-        Returns:
-            DataFrame с прогнозами на квартал
-        """
         return self.forecast(horizon=90, use_best_model=use_best_model)
     
     def plot_forecast(self, item_id: str, forecast_data: pd.DataFrame, test_data: Optional[pd.DataFrame] = None, 
-                     days_to_show: int = 30) -> None:
-        """
-        Визуализация прогноза для выбранного товара.
-        
-        Args:
-            item_id: ID товара
-            forecast_data: DataFrame с прогнозами
-            test_data: DataFrame с тестовыми данными (если есть)
-            days_to_show: Количество дней исторических данных для отображения
-        """
+                 days_to_show: int = 30) -> None:
         if self.processed_data is None:
             raise ValueError("Данные не предобработаны. Используйте метод preprocess_data() сначала.")
         
-        # Фильтрация данных для выбранного товара
         item_data = self.processed_data[self.processed_data['item_id'] == item_id].sort_values('date')
-        item_forecast = forecast_data[forecast_data['item_id'] == item_id].sort_values('date')
+        
+        # Проверяем, есть ли столбец 'item_id' в прогнозных данных
+        if 'item_id' in forecast_data.columns:
+            item_forecast = forecast_data[forecast_data['item_id'] == item_id].sort_values('date')
+        else:
+            item_forecast = forecast_data.sort_values('date')
+            print(f"Предупреждение: в прогнозных данных отсутствует столбец 'item_id'. Используются все данные.")
         
         if item_data.empty:
             print(f"Нет данных для товара {item_id}")
@@ -907,7 +743,6 @@ class SalesForecastingModel:
             print(f"Нет прогнозов для товара {item_id}")
             return
         
-        # Выбор последних days_to_show дней исторических данных
         item_data = item_data.tail(days_to_show)
         
         # Создание графика
@@ -918,7 +753,11 @@ class SalesForecastingModel:
         
         # Тестовые данные (если есть)
         if test_data is not None:
-            item_test = test_data[test_data['item_id'] == item_id].sort_values('date')
+            if 'item_id' in test_data.columns:
+                item_test = test_data[test_data['item_id'] == item_id].sort_values('date')
+            else:
+                item_test = test_data.sort_values('date')
+            
             if not item_test.empty:
                 plt.plot(item_test['date'], item_test['cnt'], label='Тестовые данные', color='green')
         
@@ -942,15 +781,11 @@ class SalesForecastingModel:
 
 
 def main():
-    """
-    Основная функция для запуска прогнозирования продаж.
-    """
     # Пути к файлам данных
-    sales_path = 'data/sales_data.csv'
-    calendar_path = 'data/calendar_data.csv'
-    prices_path = 'data/prices_data.csv'
+    sales_path = 'data/shop_sales.csv'
+    calendar_path = 'data/shop_sales_dates.csv'
+    prices_path = 'data/shop_sales_prices.csv'
     
-    # Создание экземпляра класса
     model = SalesForecastingModel(store_id='STORE_1')
     
     # Проверка наличия сохраненных моделей
@@ -965,6 +800,11 @@ def main():
         try:
             model.load_models(path=models_path)
             print("Модели успешно загружены.")
+            
+            # Загружаем и предобрабатываем данные даже при загрузке моделей
+            print("Загрузка и предобработка данных...")
+            model.load_data(sales_path, calendar_path, prices_path)
+            model.preprocess_data()
         except Exception as e:
             print(f"Ошибка при загрузке моделей: {e}")
             try_load_models = False
@@ -973,7 +813,7 @@ def main():
     if not try_load_models:
         print("Загрузка и предобработка данных...")
         model.load_data(sales_path, calendar_path, prices_path)
-        processed_data = model.preprocess_data()
+        model.preprocess_data()  
         
         print("Обучение моделей...")
         model.train_models()
@@ -1015,151 +855,6 @@ def main():
         print(f"\nПрогноз для товара {item}:")
         model.plot_forecast(item, monthly_forecast)
 
-
 if __name__ == "__main__":
     main()
 
-
-
-
-
-
-
-# # Загрузка данных
-# sales = pd.read_csv('data/sales_data.csv')  
-# calendar = pd.read_csv('data/calendar_data.csv')  
-# prices = pd.read_csv('data/prices_data.csv') 
-
-
-# class Store1Inference:
-#     def __init__(self, sales_data, calendar_data, prices_data):
-#         self.sales_data = sales_data
-#         self.calendar_data = calendar_data
-#         self.prices_data = prices_data
-
-#     # Функция для предобработки данных
-#     def preprocess_data(self, sales_data, calendar_data, prices_data, store_id='STORE_1'):
-#         # Код функции preprocess_data (как в предыдущем ответе)s
-#         # ...
-
-#     # Функции для обучения моделей
-#     def train_arma_models(data, items, max_p=3, max_q=3):
-#         # Код функции train_arma_models (как в предыдущем ответе)
-#         # ...
-
-#     def train_linear_trend_models(data, items):
-#         # Код функции train_linear_trend_models (как в предыдущем ответе)
-#         # ...
-
-#     def train_dynamic_regression_models(data, items):
-#         # Код функции train_dynamic_regression_models (как в предыдущем ответе)
-#         # ...
-
-#     def train_ets_models(data, items):
-#         # Код функции train_ets_models (как в предыдущем ответе)
-#         # ...
-
-#     def train_garch_models(data, items):
-#         # Код функции train_garch_models (как в предыдущем ответе)
-#         # ...
-
-#     # Функция для оценки моделей
-#     def evaluate_models(models, data, items, test_size=30):
-#         # Код функции evaluate_models (как в предыдущем ответе)
-#         # ...
-
-#     # Функция для визуализации прогнозов
-#     def visualize_forecasts(models, data, items, test_size=30, best_model_only=False):
-#         # Код функции visualize_forecasts (как в предыдущем ответе)
-#         # ...
-
-# # Основной код для выполнения анализа
-# # 1. Проводим EDA
-# print("Проведение разведочного анализа данных...")
-# eda_results, eda_summary = perform_eda(sales, calendar, prices)
-
-# # 2. Предобработка данных
-# print("Предобработка данных...")
-# processed_data = preprocess_data(sales, calendar, prices)
-
-# # 3. Получаем список товаров для STORE_1
-# items = sales[sales['store_id'] == 'STORE_1']['item_id'].unique()
-# print(f"Найдено {len(items)} товаров для анализа: {items}")
-
-# # 4. Обучаем модели
-# print("Обучение моделей ARMA...")
-# arma_models = train_arma_models(processed_data, items)
-
-# print("Обучение моделей линейного тренда...")
-# linear_trend_models = train_linear_trend_models(processed_data, items)
-
-# print("Обучение моделей динамической регрессии...")
-# dynamic_regression_models = train_dynamic_regression_models(processed_data, items)
-
-# print("Обучение моделей ETS...")
-# ets_models = train_ets_models(processed_data, items)
-
-# print("Обучение моделей GARCH...")
-# garch_models = train_garch_models(processed_data, items)
-
-# print("Обучение моделей Prophet...")
-# prophet_models = train_prophet_models(processed_data, items)
-
-# # 5. Собираем все модели в один словарь
-# all_models = {
-#     'arma': arma_models,
-#     'linear_trend': linear_trend_models,
-#     'dynamic_regression': dynamic_regression_models,
-#     'ets': ets_models,
-#     'garch': garch_models,
-#     'prophet': prophet_models
-# }
-
-# # 6. Оцениваем модели
-# print("Оценка качества моделей...")
-# evaluation_results = evaluate_models(all_models, processed_data, items, test_size=30)
-
-# # 7. Выводим сводную таблицу
-# print("Сводная таблица результатов по всем моделям:")
-# summary_table = evaluation_results.pivot_table(
-#     index='model', 
-#     values=['MAE', 'RMSE', 'MAPE', 'SMAPE', 'MASE'], 
-#     aggfunc='mean'
-# ).sort_values('MASE')
-# print(summary_table)
-
-# # 8. Находим лучшую модель для каждого товара
-# best_models = evaluation_results.loc[evaluation_results.groupby('item_id')['MASE'].idxmin()]
-# print("\nЛучшие модели для каждого товара:")
-# print(best_models[['item_id', 'model', 'MASE', 'SMAPE']])
-
-# # 9. Подсчитываем, сколько раз каждая модель оказалась лучшей
-# model_counts = best_models['model'].value_counts()
-# print("\nКоличество товаров, для которых каждая модель оказалась лучшей:")
-# print(model_counts)
-
-# # 10. Визуализируем прогнозы лучших моделей
-# print("\nВизуализация прогнозов лучших моделей...")
-# visualize_forecasts(all_models, processed_data, items, test_size=30, best_model_only=True)
-
-# # 11. Создаем график распределения метрик по моделям
-# plt.figure(figsize=(12, 8))
-# sns.boxplot(x='model', y='MASE', data=evaluation_results)
-# plt.title('Распределение MASE по моделям')
-# plt.xticks(rotation=45)
-# plt.tight_layout()
-# plt.show()
-
-# # 12. Создаем тепловую карту для сравнения моделей
-# pivot_metrics = evaluation_results.pivot_table(
-#     index='item_id', 
-#     columns='model', 
-#     values='MASE'
-# )
-
-# plt.figure(figsize=(12, 10))
-# sns.heatmap(pivot_metrics, annot=True, cmap='YlGnBu', fmt='.3f')
-# plt.title('Тепловая карта MASE по товарам и моделям')
-# plt.tight_layout()
-# plt.show()
-            
